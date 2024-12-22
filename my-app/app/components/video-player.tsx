@@ -1,135 +1,110 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
 
-interface VideoPlayerProps {
-  src: string
-  poster?: string
-}
-
-export default function VideoPlayer({ src, poster }: VideoPlayerProps) {
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isMuted, setIsMuted] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [progress, setProgress] = useState(0)
+export default function VideoPlayer() {
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [mongoData, setMongoData] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
+    // Video streaming endpoint with cache-busting
+    const fullVideoUrl = `/api/video?nocache=${Math.random()}`
+    setVideoUrl(fullVideoUrl)
 
-    const updateProgress = () => {
-      const progress = (video.currentTime / video.duration) * 100
-      setProgress(progress)
-    }
-
-    video.addEventListener('timeupdate', updateProgress)
-    return () => video.removeEventListener('timeupdate', updateProgress)
+    // Fetch video metadata
+    fetch('/api/data')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to fetch data')
+        }
+        return response.json()
+      })
+      .then(data => {
+        setMongoData(data)
+        console.log('Fetched Video Metadata:', data)
+      })
+      .catch(error => {
+        console.error('Metadata Fetch Error:', error)
+        setError('Unable to load video details')
+      })
   }, [])
 
-  const togglePlay = () => {
+  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+    console.group('Video Error Diagnostics')
+    console.error('Event Type:', e.type)
+    console.error('Event Details:', e)
+
     if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause()
-      } else {
-        videoRef.current.play()
-      }
-      setIsPlaying(!isPlaying)
-    }
-  }
+      const mediaError = videoRef.current.error
+      console.log('Video Element Properties:', {
+        currentSrc: videoRef.current.currentSrc,
+        networkState: videoRef.current.networkState,
+        readyState: videoRef.current.readyState,
+        error: mediaError ? {
+          code: mediaError.code,
+          message: mediaError.message
+        } : null
+      })
 
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted
-      setIsMuted(!isMuted)
-    }
-  }
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return
-
-    if (!isFullscreen) {
-      if (containerRef.current.requestFullscreen) {
-        containerRef.current.requestFullscreen()
-      }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen()
+      if (mediaError) {
+        console.error('Media Error Details:', {
+          code: mediaError.code,
+          message: mediaError.message
+        })
       }
     }
-    setIsFullscreen(!isFullscreen)
-  }
 
-  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!videoRef.current) return
+    console.groupEnd()
 
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const percentage = (x / rect.width) * 100
-    const time = (percentage / 100) * videoRef.current.duration
-    videoRef.current.currentTime = time
+    const errorMap: { [key: number]: string } = {
+      1: 'MEDIA_ERR_ABORTED: Fetching process aborted',
+      2: 'MEDIA_ERR_NETWORK: Network error',
+      3: 'MEDIA_ERR_DECODE: Decoding error',
+      4: 'MEDIA_ERR_SRC_NOT_SUPPORTED: Video format not supported'
+    }
+
+    const errorCode = videoRef.current?.error?.code
+    const errorMessage = errorCode ? 
+      errorMap[errorCode] || `Unknown error (Code: ${errorCode})` : 
+      'Unknown video playback error'
+
+    setError(`Video Playback Error: ${errorMessage}`)
   }
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative group w-full aspect-video bg-black"
-    >
-      <video
-        ref={videoRef}
-        src={src}
-        poster={poster}
-        className="w-full h-full"
-      />
-
-      {/* Controls */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 p-4 transform translate-y-full opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-        {/* Progress bar */}
-        <div 
-          className="w-full h-1 bg-gray-600 cursor-pointer mb-4"
-          onClick={seek}
+    <div className="max-w-2xl mx-auto">
+      {videoUrl && (
+        <video 
+          ref={videoRef}
+          controls 
+          width="100%" 
+          className="rounded-lg shadow-lg"
+          onError={handleVideoError}
         >
-          <div 
-            className="h-full bg-red-600"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+          <source src={videoUrl} type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+      )}
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button onClick={togglePlay}>
-              {isPlaying ? (
-                <Pause className="w-6 h-6" />
-              ) : (
-                <Play className="w-6 h-6" />
-              )}
-            </button>
-            <button onClick={toggleMute}>
-              {isMuted ? (
-                <VolumeX className="w-6 h-6" />
-              ) : (
-                <Volume2 className="w-6 h-6" />
-              )}
-            </button>
-            <button onClick={() => videoRef.current && (videoRef.current.currentTime -= 10)}>
-              <SkipBack className="w-6 h-6" />
-            </button>
-            <button onClick={() => videoRef.current && (videoRef.current.currentTime += 10)}>
-              <SkipForward className="w-6 h-6" />
-            </button>
-          </div>
-          <button onClick={toggleFullscreen}>
-            {isFullscreen ? (
-              <Minimize className="w-6 h-6" />
-            ) : (
-              <Maximize className="w-6 h-6" />
-            )}
-          </button>
+      {error && (
+        <div className="mt-4 p-4 bg-red-100 text-red-800 rounded">
+          <strong>Error:</strong> {error}
         </div>
-      </div>
+      )}
+
+      {mongoData && (
+        <div className="mt-4 p-4 bg-gray-100 rounded text-black">
+          <h2 className="text-xl font-bold mb-2">Video Details</h2>
+          <div className="space-y-2">
+            <p><strong>Name:</strong> {mongoData.name || 'Unknown'}</p>
+            <p><strong>Description:</strong> {mongoData.description || 'No description available'}</p>
+            <p><strong>Duration:</strong> {mongoData.duration ? `${mongoData.duration} seconds` : 'Not specified'}</p>
+            <p><strong>Upload Date:</strong> {mongoData.uploadDate || 'Unknown'}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
